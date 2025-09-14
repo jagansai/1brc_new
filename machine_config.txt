@@ -1,0 +1,23 @@
+
+Manufacturer          Model                               TotalPhysicalMemory
+------------          -----                               -------------------
+ASUSTeK COMPUTER INC. VivoBook_ASUSLaptop TP470EA_TP470EA         16856338432
+
+
+Name                                           NumberOfCores NumberOfLogicalProcessors
+----                                           ------------- -------------------------
+11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz             4                         8
+
+
+Caption                   Version
+-------                   -------
+Microsoft Windows 11 Home 10.0.26220
+
+openjdk version "24.0.2" 2025-07-15
+OpenJDK Runtime Environment (build 24.0.2+12-54)
+OpenJDK 64-Bit Server VM (build 24.0.2+12-54, mixed mode, sharing)
+Apache Maven 3.9.11 (3e54c93a704957b63ee3494413a2b544fd3d825b)
+Maven home: D:\software\apache-maven-3.9.11
+Java version: 24.0.2, vendor: Oracle Corporation, runtime: D:\Program Files\Java\jdk-24.0.2
+Default locale: en_US, platform encoding: UTF-8
+OS name: "windows 11", version: "10.0", arch: "amd64", family: "windows"
