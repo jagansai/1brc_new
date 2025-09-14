@@ -67,3 +67,25 @@ mvn -v 2>&1 | Out-File -Append machine_config.txt
 ```
 
 This writes a small report to `machine_config.txt` you can include with benchmarking results.
+
+## Attempt-2 (Custom parsing improvements)
+
+The following runs were performed on the full measurements file with the optimized `CalculateAverage` implementation that uses a custom ASCII double parser to reduce per-line allocations and parsing overhead.
+
+| Mode | Parallel | Output file | Elapsed | Comparison |
+|------|----------|-------------|---------|------------|
+| sai | True | sai_output_parallel.txt | 00:02:45.4430233 | skipped |
+| sai | False | sai_output_sequential.txt | 00:02:51.4015248 | skipped |
+| baseline | True | baseline_output_parallel.txt | 00:03:07.7177463 | identical |
+| baseline | False | baseline_output_sequential.txt | 00:03:43.3887907 | identical |
+
+And the same data in the alternate compact table format produced by `run_all.ps1`:
+
+Mode     Parallel OutFile                        Elapsed          Comparison
+----     -------- -------                        -------          ----------
+sai          True sai_output_parallel.txt        00:02:45.4430233 skipped
+sai         False sai_output_sequential.txt      00:02:51.4015248 skipped
+baseline     True baseline_output_parallel.txt   00:03:07.7177463 identical
+baseline    False baseline_output_sequential.txt 00:03:43.3887907 identical
+
+Note: these Attempt-2 runs used a custom parsing routine in `CalculateAverage.java` that replaces the original String.split + `Double.parseDouble` path with an indexOf-based city split and an ASCII double parser. That change significantly reduces short-lived String and boxed-number allocations and reduced elapsed times on sequential runs.
