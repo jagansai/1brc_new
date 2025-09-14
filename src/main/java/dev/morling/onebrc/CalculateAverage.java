@@ -63,8 +63,6 @@ public class CalculateAverage {
         System.out.println("Using measurements file: " + measurementsPath);
         Path measurements = Path.of(measurementsPath);
 
-        // Use one small CityTemperatureRecord instance per city; choose
-        // ConcurrentHashMap only for parallel
         Map<String, CityTemperatureRecord> records = asParallel ? new ConcurrentHashMap<>() : new HashMap<>();
 
         try (var stream = Files.lines(measurements)) {
@@ -105,10 +103,10 @@ public class CalculateAverage {
 
     private static void processLine(String line, Map<String, CityTemperatureRecord> records, boolean asParallel) {
         try {
-            String[] parts = line.split(DELIMETER);
-            if (parts.length == 2) {
-                String city = parts[0].trim();
-                double temperature = Double.parseDouble(parts[1].trim());
+            int delimIdx = line.indexOf(DELIMETER);
+            if (delimIdx > 0 && delimIdx < line.length() - 1) {
+                String city = line.substring(0, delimIdx).trim();
+                double temperature = parseDoubleAscii(line, delimIdx + 1, line.length());
                 CityTemperatureRecord cityRecord = records.computeIfAbsent(city,
                         (k) -> new CityTemperatureRecord(k));
                 if (asParallel) {
@@ -119,11 +117,104 @@ public class CalculateAverage {
                     // sequential
                     cityRecord.accept(temperature);
                 }
-
             }
         } catch (NumberFormatException e) {
             // Log and ignore malformed lines
             System.err.println("Ignoring malformed line: " + line);
         }
+    }
+
+    /**
+     * Fast ASCII double parser for the substring [start, end).
+     * Supports optional leading/trailing spaces, sign, fractional part and
+     * exponent.
+     * Throws NumberFormatException on invalid input.
+     */
+    private static double parseDoubleAscii(String s, int start, int end) {
+        int i = start;
+        // skip leading whitespace
+        while (i < end && Character.isWhitespace(s.charAt(i)))
+            i++;
+        if (i >= end)
+            throw new NumberFormatException(s.substring(start, end));
+
+        int sign = 1;
+        char c = s.charAt(i);
+        if (c == '+' || c == '-') {
+            if (c == '-')
+                sign = -1;
+            i++;
+        }
+
+        long intPart = 0;
+        while (i < end) {
+            c = s.charAt(i);
+            if (c >= '0' && c <= '9') {
+                intPart = intPart * 10 + (c - '0');
+                i++;
+            } else
+                break;
+        }
+
+        double value = (double) intPart;
+
+        // fraction
+        if (i < end && s.charAt(i) == '.') {
+            i++;
+            long frac = 0;
+            int fracLen = 0;
+            while (i < end) {
+                c = s.charAt(i);
+                if (c >= '0' && c <= '9') {
+                    frac = frac * 10 + (c - '0');
+                    fracLen++;
+                    i++;
+                } else
+                    break;
+            }
+            if (fracLen > 0) {
+                value += frac / Math.pow(10.0, fracLen);
+            }
+        }
+
+        // exponent
+        if (i < end && (s.charAt(i) == 'e' || s.charAt(i) == 'E')) {
+            i++;
+            int expSign = 1;
+            if (i < end) {
+                c = s.charAt(i);
+                if (c == '+' || c == '-') {
+                    if (c == '-')
+                        expSign = -1;
+                    i++;
+                }
+            }
+            int exp = 0;
+            int expDigits = 0;
+            while (i < end) {
+                c = s.charAt(i);
+                if (c >= '0' && c <= '9') {
+                    exp = exp * 10 + (c - '0');
+                    expDigits++;
+                    i++;
+                } else
+                    break;
+            }
+            if (expDigits > 0) {
+                value = value * Math.pow(10.0, expSign * exp);
+            } else {
+                throw new NumberFormatException(s.substring(start, end));
+            }
+        }
+
+        // skip trailing whitespace
+        while (i < end && Character.isWhitespace(s.charAt(i)))
+            i++;
+        if (i != end) {
+            // trailing garbage
+            throw new NumberFormatException(s.substring(start, end));
+        }
+
+        return sign * value;
     }
 }

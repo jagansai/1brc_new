@@ -25,7 +25,13 @@ $combinations = @(
 
 $results = @()
 
-foreach ($c in $combinations) {
+# Randomize execution order to avoid run-order bias
+$rnd = New-Object System.Random
+$shuffled = $combinations | Sort-Object { $rnd.Next() }
+Write-Host "Execution order:"
+foreach ($item in $shuffled) { Write-Host "  $($item.mode) (parallel=$($item.parallel))" }
+
+foreach ($c in $shuffled) {
     $mode = $c.mode
     $par = $c.parallel
     $suffix = if ($par) { 'parallel' } else { 'sequential' }
