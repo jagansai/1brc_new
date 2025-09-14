@@ -1,6 +1,10 @@
 # Runs the 4 combinations (baseline/sai x sequential/parallel)
 # Saves per-run elapsed time and output comparison status to attempt1_results.md
 
+param(
+    [string]$measurements = ".\measurements.txt",  # path to measurements file; passed as -Dmeasurements=path
+    [string]$javaArgs = "-Xms4g -Xmx8g -Xlog:gc*:file=gc.log:time,uptime,level -XX:+AlwaysPreTouch -XX:+DisableExplicitGC" # JVM args to pass before the main class
+)
 
 # delete old output files if present
 $oldFiles = @("baseline_output_sequential.txt", "baseline_output_parallel.txt", "sai_output_sequential.txt", "sai_output_parallel.txt")
@@ -31,9 +35,9 @@ foreach ($c in $combinations) {
 
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     if ($par) {
-        & .\run.ps1 -version $mode -parallel
+        & .\run.ps1 -version $mode -parallel -measurements $measurements -javaArgs $javaArgs
     } else {
-        & .\run.ps1 -version $mode
+        & .\run.ps1 -version $mode -measurements $measurements -javaArgs $javaArgs
     }
     $sw.Stop()
 
@@ -71,3 +75,6 @@ foreach ($r in $results) {
 }
 
 $md | Out-default 
+
+# also format-table
+$results | Format-Table -AutoSize

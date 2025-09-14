@@ -4,12 +4,14 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class CalculateAverage {
 
     /**
-     * Mutable accumulator used per-city to reduce allocations and support concurrent updates.
+     * Mutable accumulator used per-city to reduce allocations and support
+     * concurrent updates.
      */
     private static final class CityTemperatureRecord {
         final String name;
@@ -18,19 +20,36 @@ public class CalculateAverage {
         double sum;
         long count;
 
-        CityTemperatureRecord(String name, double value) {
+        CityTemperatureRecord(String name) {
             this.name = name;
-            this.min = value;
-            this.max = value;
-            this.sum = value;
-            this.count = 1;
+            this.min = Double.POSITIVE_INFINITY;
+            this.max = Double.NEGATIVE_INFINITY;
+            this.sum = 0.0;
+            this.count = 0;
         }
 
-        synchronized void accept(double v) {
-            if (v < min) min = v;
-            if (v > max) max = v;
-            sum += v;
-            count++;
+        // CityTemperatureRecord(String name, double value) {
+        // this.name = name;
+        // this.min = value;
+        // this.max = value;
+        // this.sum = value;
+        // this.count = 1;
+        // }
+
+        void accept(double v) {
+            if (count == 0) {
+                min = v;
+                max = v;
+                sum = v;
+                count = 1;
+            } else {
+                if (v < min)
+                    min = v;
+                if (v > max)
+                    max = v;
+                sum += v;
+                count++;
+            }
         }
     }
 
@@ -38,14 +57,19 @@ public class CalculateAverage {
 
     public static void main(String[] args) throws IOException {
         final boolean asParallel = args.length > 0 && "parallel".equals(args[0]);
-        Path measurements = Path.of("measurements.txt");
+        // Allow overriding the measurements file via system property
+        // -Dmeasurements=path
+        String measurementsPath = System.getProperty("measurements", "measurements.txt");
+        System.out.println("Using measurements file: " + measurementsPath);
+        Path measurements = Path.of(measurementsPath);
 
-    // Use one small CityTemperatureRecord instance per city; ConcurrentHashMap for thread-safety
-    Map<String, CityTemperatureRecord> records = new ConcurrentHashMap<>();
+        // Use one small CityTemperatureRecord instance per city; choose
+        // ConcurrentHashMap only for parallel
+        Map<String, CityTemperatureRecord> records = asParallel ? new ConcurrentHashMap<>() : new HashMap<>();
 
         try (var stream = Files.lines(measurements)) {
             var lineStream = asParallel ? stream.parallel() : stream;
-            lineStream.forEach((line) -> processLine(line, records));
+            lineStream.forEach((line) -> processLine(line, records, asParallel));
         } finally {
             // System.out.println("Finished processing lines.");
         }
@@ -53,7 +77,7 @@ public class CalculateAverage {
         StringBuilder sb = new StringBuilder();
         sb.append("{");
 
-        try ( var recordStream = records.entrySet().stream()
+        try (var recordStream = records.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())) {
             recordStream.forEach(e -> {
                 CityTemperatureRecord acc = e.getValue();
@@ -62,11 +86,11 @@ public class CalculateAverage {
                 double sum = acc.sum;
                 long count = acc.count;
                 sb.append(acc.name + "=" +
-                          String.format("%.1f", min) +
-                          "/" +
-                          String.format("%.1f", sum / count) +
-                          "/" +
-                          String.format("%.1f", max) + ", ");
+                        String.format("%.1f", min) +
+                        "/" +
+                        String.format("%.1f", sum / count) +
+                        "/" +
+                        String.format("%.1f", max) + ", ");
             });
         }
 
@@ -79,22 +103,23 @@ public class CalculateAverage {
         System.out.println(sb.toString());
     }
 
-    private static void processLine(String line, Map<String, CityTemperatureRecord> records) {
+    private static void processLine(String line, Map<String, CityTemperatureRecord> records, boolean asParallel) {
         try {
             String[] parts = line.split(DELIMETER);
             if (parts.length == 2) {
                 String city = parts[0].trim();
                 double temperature = Double.parseDouble(parts[1].trim());
-
-                // Use compute to initialize or update the Stats atomically per key.
-                records.compute(city, (_, acc) -> {
-                    if (acc == null) {
-                        return new CityTemperatureRecord(city, temperature);
-                    } else {
-                        acc.accept(temperature);
-                        return acc;
+                CityTemperatureRecord cityRecord = records.computeIfAbsent(city,
+                        (k) -> new CityTemperatureRecord(k));
+                if (asParallel) {
+                    synchronized (cityRecord) {
+                        cityRecord.accept(temperature);
                     }
-                });
+                } else {
+                    // sequential
+                    cityRecord.accept(temperature);
+                }
+
             }
         } catch (NumberFormatException e) {
             // Log and ignore malformed lines

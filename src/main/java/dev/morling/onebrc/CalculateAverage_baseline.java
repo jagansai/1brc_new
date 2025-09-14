@@ -67,6 +67,12 @@ public class CalculateAverage_baseline {
         
 
         final boolean asParallel = args.length > 0 && "parallel".equals(args[0]);
+
+    // Allow overriding the measurements file via system property
+    // -Dmeasurements=path
+    String measurementsPath = System.getProperty("measurements", "measurements.txt");
+    System.out.println("Using measurements file: " + measurementsPath);
+
         Collector<Measurement, MeasurementAggregator, ResultRow> collector = Collector.of(
                 MeasurementAggregator::new,
                 (a, m) -> {
@@ -88,7 +94,7 @@ public class CalculateAverage_baseline {
                     return new ResultRow(agg.min, (Math.round(agg.sum * 10.0) / 10.0) / agg.count, agg.max);
                 });
 
-        Stream<String> stream = Files.lines(Paths.get(FILE));
+        Stream<String> stream = Files.lines(Paths.get(measurementsPath));
         try (stream) {
             Stream<String> s = asParallel ? stream.parallel() : stream;
 
