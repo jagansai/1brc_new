@@ -41,7 +41,7 @@ foreach ($c in $shuffled) {
 
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     if ($par) {
-        & .\run.ps1 -version $mode -parallel -measurements $measurements -javaArgs $javaArgs
+        & .\run.ps1 -version $mode -parallel -measurements $measurements -javaArgs $javaArgs 
     } else {
         & .\run.ps1 -version $mode -measurements $measurements -javaArgs $javaArgs
     }

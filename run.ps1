@@ -13,14 +13,16 @@ $outFile = if ($version -eq 'baseline') { "baseline_output_${mode}.txt" } else {
 Write-Host "Running class: $class -> $outFile"
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
- $jvmArgsArray = if ([string]::IsNullOrWhiteSpace($javaArgs)) { @() } else { ($javaArgs -split '\s+') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } }
+$jvmArgsArray = if ([string]::IsNullOrWhiteSpace($javaArgs)) { @() } else { ($javaArgs -split '\s+') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } }
 
-if ([string]::IsNullOrWhiteSpace($measurements)) {
-    & java @jvmArgsArray --class-path ".\target\1brc_new-1.0-SNAPSHOT.jar" $class $mode @appArgs >> $outFile 2>&1
-} else {
-    # pass measurements as a JVM system property before the main class
-    & java -Dmeasurements="$measurements" @jvmArgsArray --class-path ".\target\1brc_new-1.0-SNAPSHOT.jar" $class $mode @appArgs >> $outFile 2>&1
+# System properties to pass before JVM args (e.g. -Dmeasurements)
+$sysProps = @()
+if (-not [string]::IsNullOrWhiteSpace($measurements)) {
+    $sysProps += "-Dmeasurements=$measurements"
 }
+
+
+& java @sysProps @jvmArgsArray --class-path ".\target\1brc_new-1.0-SNAPSHOT.jar" $class $mode @appArgs >> $outFile 2>&1
 $sw.Stop()
 Write-Host ("Elapsed: {0}" -f $sw.Elapsed)
 
