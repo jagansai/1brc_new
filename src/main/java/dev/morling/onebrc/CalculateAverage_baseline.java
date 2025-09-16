@@ -72,6 +72,8 @@ public class CalculateAverage_baseline {
     // -Dmeasurements=path
     String measurementsPath = System.getProperty("measurements", "measurements.txt");
     System.out.println("Using measurements file: " + measurementsPath);
+    System.out.println("Running in " + (asParallel ? "parallel" : "sequential") + " mode");
+    System.out.println("End of configuration.");
 
         Collector<Measurement, MeasurementAggregator, ResultRow> collector = Collector.of(
                 MeasurementAggregator::new,

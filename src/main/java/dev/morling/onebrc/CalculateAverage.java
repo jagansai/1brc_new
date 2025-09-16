@@ -62,14 +62,22 @@ public class CalculateAverage {
     private static final char SPACE = ' ';
 
     // Use block-based processing for both sequential and parallel modes
-    private static final int blockSize = 1_000_000; // 1 MB blocks
+    private static final String DEFAULT_BLOCK_SIZE = "1000000"; // 1 MB blocks
 
     public static void main(String[] args) throws IOException {
         final boolean asParallel = args.length > 0 && "parallel".equals(args[0]);
         // Allow overriding the measurements file via system property
         // -Dmeasurements=path
         String measurementsPath = System.getProperty("measurements", "measurements.txt");
+        int blockSize = Integer.parseInt(System.getProperty("blockSize", DEFAULT_BLOCK_SIZE));
+        if (blockSize < 1024)
+            blockSize = 1024;
+        
+        System.out.println("Running in " + (asParallel ? "parallel" : "sequential") + " mode");
+        System.out.println("Using block size: " + blockSize);
         System.out.println("Using measurements file: " + measurementsPath);
+        System.out.println("End of configuration.");
+
         Path measurements = Path.of(measurementsPath);
 
         Map<String, CityTemperatureRecord> records = asParallel ? new ConcurrentHashMap<>() : new HashMap<>();

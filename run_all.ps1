@@ -3,7 +3,8 @@
 
 param(
     [string]$measurements = ".\measurements.txt",  # path to measurements file; passed as -Dmeasurements=path
-    [string]$javaArgs = "-Xms4g -Xmx8g -Xlog:gc*:file=gc.log:time,uptime,level -XX:+AlwaysPreTouch -XX:+DisableExplicitGC" # JVM args to pass before the main class
+    [string]$javaArgs = "-Xms4g -Xmx8g -Xlog:gc*:file=gc.log:time,uptime,level -XX:+AlwaysPreTouch -XX:+DisableExplicitGC", # JVM args to pass before the main class
+    [int]$blockSize = 1024  # optional block size; passed as -DblockSize=size
 )
 
 # delete old output files if present
@@ -17,10 +18,10 @@ foreach ($f in $oldFiles) {
 
 
 $combinations = @(
-    @{mode='baseline'; parallel=$false},
-    @{mode='baseline'; parallel=$true},
-    @{mode='sai';      parallel=$false},
-    @{mode='sai';      parallel=$true}
+    @{mode = 'baseline'; parallel = $false },
+    @{mode = 'baseline'; parallel = $true },
+    @{mode = 'sai'; parallel = $false },
+    @{mode = 'sai'; parallel = $true }
 )
 
 $results = @()
@@ -41,9 +42,10 @@ foreach ($c in $shuffled) {
 
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     if ($par) {
-        & .\run.ps1 -version $mode -parallel -measurements $measurements -javaArgs $javaArgs 
-    } else {
-        & .\run.ps1 -version $mode -measurements $measurements -javaArgs $javaArgs
+        & .\run.ps1 -version $mode -parallel -measurements $measurements -javaArgs $javaArgs -blockSize $blockSize
+    }
+    else {
+        & .\run.ps1 -version $mode -measurements $measurements -javaArgs $javaArgs -blockSize $blockSize
     }
     $sw.Stop()
 
@@ -54,7 +56,27 @@ foreach ($c in $shuffled) {
     $existsBaseline = Test-Path $baselineFile
     $existsSai = Test-Path $saiFile
     if ($existsBaseline -and $existsSai) {
-        $cmpRaw = Compare-Object (Get-Content $baselineFile) (Get-Content $saiFile) | Out-String
+        # If sai output contains a preamble, ignore everything up to 'End of configuration.' for comparison
+        function Get-Content-AfterMarker {
+            param([string]$path)
+            try {
+                $lines = Get-Content $path -ErrorAction Stop
+            }
+            catch {
+                return @()
+            }
+            $regex = '^(?i)End of configuration\.?$'
+            $match = $lines | Select-String -Pattern $regex | Select-Object -First 1
+            if ($match) {
+                $start = $match.LineNumber
+                if ($start -lt $lines.Length) { return $lines[$start..($lines.Length - 1)] } else { return @() }
+            }
+            return $lines
+        }
+
+        $left = Get-Content-AfterMarker -path $baselineFile
+        $right = Get-Content-AfterMarker -path $saiFile
+        $cmpRaw = Compare-Object $left $right | Out-String
         $cmp = $cmpRaw.Trim()
         if ($cmp -eq '') { $comparison = 'identical' } else { $comparison = 'diff' }
     } else {

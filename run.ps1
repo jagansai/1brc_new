@@ -3,7 +3,8 @@ param(
     [string[]]$appArgs = @(),
     [switch]$parallel,
     [string]$measurements = "",  # optional path to measurements file; passed as -Dmeasurements=path
-    [string]$javaArgs = "-Xms2G -Xmx4G  -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:+UseG1GC -Xlog:gc*:file=gc.log:time,uptime,level" # JVM args to pass before the main class
+    [string]$javaArgs = "-Xms2G -Xmx4G  -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:+UseG1GC -Xlog:gc*:file=gc.log:time,uptime,level", # JVM args to pass before the main class
+    [int]$blockSize = 0  # optional block size; passed as -DblockSize=size
 )
 
 $mode = if ($parallel) { 'parallel' } else { 'sequential' }
@@ -20,6 +21,9 @@ $sysProps = @()
 if (-not [string]::IsNullOrWhiteSpace($measurements)) {
     $sysProps += "-Dmeasurements=$measurements"
 }
+if ($blockSize -gt 0) {
+    $sysProps += "-DblockSize=$blockSize"
+}
 
 
 & java @sysProps @jvmArgsArray --class-path ".\target\1brc_new-1.0-SNAPSHOT.jar" $class $mode @appArgs >> $outFile 2>&1
@@ -35,10 +39,12 @@ $outContent = ""
 if (Test-Path $outFile) {
     try {
         $outContent = Get-Content $outFile -Raw -ErrorAction Stop
-    } catch {
+    }
+    catch {
         $outContent = "";
     }
-} else {
+}
+else {
     Write-Host "Warning: output file $outFile not created." -ForegroundColor Red
 }
 
@@ -61,14 +67,37 @@ if ($failed) {
     Write-Host "---- Last 20 lines of $outFile ----" -ForegroundColor Red
     if (Test-Path $outFile) {
         Get-Content $outFile -Tail 20 | ForEach-Object { Write-Host $_ -ForegroundColor Red }
-    } else {
+    }
+    else {
         Write-Host "(no output file)" -ForegroundColor Red
     }
 }
 
 if ((Test-Path $baselineFile) -and (Test-Path $saiFile)) {
     Write-Host "Comparing $baselineFile and $saiFile"
-    Compare-Object (Get-Content $baselineFile) (Get-Content $saiFile)
+    # Helper: for sai outputs ignore preamble up to 'End of configuration.' if present
+    function Get-Content-AfterMarker {
+        param([string]$path)
+        # Read file lines and, if present, strip everything up to and including the first
+        # line that matches 'End of configuration' (case-insensitive, optional trailing period).
+        try {
+            $lines = Get-Content $path -ErrorAction Stop
+        } catch {
+            return @()
+        }
+        $regex = '^(?i)End of configuration\.?$'
+        $match = $lines | Select-String -Pattern $regex | Select-Object -First 1
+        if ($match) {
+            $start = $match.LineNumber
+            # Return lines after the matched line
+            if ($start -lt $lines.Length) { return $lines[$start..($lines.Length - 1)] } else { return @() }
+        }
+        return $lines
+    }
+
+    $left = Get-Content-AfterMarker -path $baselineFile
+    $right = Get-Content-AfterMarker -path $saiFile
+    Compare-Object $left $right
 } else {
     Write-Host "One or both output files missing; skipping comparison."
 }
