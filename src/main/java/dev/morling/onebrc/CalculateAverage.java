@@ -3,6 +3,7 @@ package dev.morling.onebrc;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
@@ -45,7 +46,7 @@ public class CalculateAverage {
 
         Path measurements = Path.of(measurementsPath);
 
-        Map<String, CityTemperatureRecord> records = asParallel ? new ConcurrentHashMap<>() : new HashMap<>();
+        Map<String, CityTemperatureRecord> records = new HashMap<>();
 
         int maxThreads = asParallel ? 16 : 1;
         processFileByBlocks(measurements, records, blockSize, maxThreads);
@@ -169,7 +170,7 @@ public class CalculateAverage {
                 : null;
         AtomicLong batchId = new AtomicLong(0);
 
-        try (var ch = java.nio.channels.FileChannel.open(file, java.nio.file.StandardOpenOption.READ)) {
+        try (var ch = FileChannel.open(file, StandardOpenOption.READ)) {
             long fileSize = ch.size();
             long position = 0L;
             while (position < fileSize) {
@@ -192,13 +193,14 @@ public class CalculateAverage {
                     sequentialProcessing(records, block, id);
                 }
             }
-            if (executor != null) {
-                // merge all results
-                mergeResults(records, futures);
-            }
+
         } finally {
             if (executor != null)
                 executor.shutdown();
+        }
+        if ( executor != null) {
+            // merge all results
+            mergeResultsForParallelProcessing(records, futures);
         }
     }
 
@@ -255,14 +257,19 @@ public class CalculateAverage {
             Semaphore permits,
             final byte[] block, final long id) throws IOException {
         try {
+            
             permits.acquire();
+
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             throw new IOException(ie);
         }
+
         futures.add(executor.submit(() -> {
             try {
+        
                 return processBlock(block, id);
+        
             } finally {
                 permits.release();
             }
@@ -278,7 +285,7 @@ public class CalculateAverage {
         }
     }
 
-    private static void mergeResults(Map<String, CityTemperatureRecord> records,
+    private static void mergeResultsForParallelProcessing(Map<String, CityTemperatureRecord> records,
             List<Future<Map<String, CityTemperatureRecord>>> futures) {
         for (var f : futures) {
             try {
