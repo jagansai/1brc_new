@@ -20,42 +20,7 @@ import java.util.concurrent.Semaphore;
 
 public class CalculateAverage {
 
-    /**
-     * Mutable accumulator used per-city to reduce allocations and support
-     * concurrent updates.
-     */
-    private static final class CityTemperatureRecord {
-        final String name;
-        double min;
-        double max;
-        double sum;
-        long count;
-
-        CityTemperatureRecord(String name) {
-            this.name = name;
-            this.min = Double.POSITIVE_INFINITY;
-            this.max = Double.NEGATIVE_INFINITY;
-            this.sum = 0.0;
-            this.count = 0;
-        }
-
-        void accept(double v) {
-            if (count == 0) {
-                min = v;
-                max = v;
-                sum = v;
-                count = 1;
-            } else {
-                if (v < min)
-                    min = v;
-                if (v > max)
-                    max = v;
-                sum += v;
-                count++;
-            }
-        }
-    }
-
+    
     private static final char DELIMETER = ';';
     private static final char NEW_LINE = '\n';
     private static final char CARRIAGE_RETURN = '\r';
@@ -113,98 +78,7 @@ public class CalculateAverage {
         // write to file sai_output.txt
         System.out.println(sb.toString());
     }
-
-
-    /**
-     * Byte-array version of parseDoubleAscii. Parses bytes in [start, end).
-     * Assumes ASCII/UTF-8 encoded digits, sign, dot, exponent and whitespace.
-     */
-    private static double parseDoubleAscii(byte[] b, int start, int end) {
-        int i = start;
-        // skip leading whitespace
-        while (i < end && (b[i] == SPACE || b[i] == CARRIAGE_RETURN || b[i] == '\r' || b[i] == NEW_LINE))
-            i++;
-        if (i >= end)
-            throw new NumberFormatException(new String(b, start, end - start, StandardCharsets.UTF_8));
-
-        int sign = 1;
-        byte c = b[i];
-        if (c == '+' || c == '-') {
-            if (c == '-')
-                sign = -1;
-            i++;
-        }
-
-        long intPart = 0;
-        while (i < end) {
-            c = b[i];
-            if (c >= '0' && c <= '9') {
-                intPart = intPart * 10 + (c - '0');
-                i++;
-            } else
-                break;
-        }
-
-        double value = (double) intPart;
-
-        // fraction
-        if (i < end && b[i] == '.') {
-            i++;
-            long frac = 0;
-            int fracLen = 0;
-            while (i < end) {
-                c = b[i];
-                if (c >= '0' && c <= '9') {
-                    frac = frac * 10 + (c - '0');
-                    fracLen++;
-                    i++;
-                } else
-                    break;
-            }
-            if (fracLen > 0) {
-                value += frac / Math.pow(10.0, fracLen);
-            }
-        }
-
-        // exponent
-        if (i < end && (b[i] == 'e' || b[i] == 'E')) {
-            i++;
-            int expSign = 1;
-            if (i < end) {
-                c = b[i];
-                if (c == '+' || c == '-') {
-                    if (c == '-')
-                        expSign = -1;
-                    i++;
-                }
-            }
-            int exp = 0;
-            int expDigits = 0;
-            while (i < end) {
-                c = b[i];
-                if (c >= '0' && c <= '9') {
-                    exp = exp * 10 + (c - '0');
-                    expDigits++;
-                    i++;
-                } else
-                    break;
-            }
-            if (expDigits > 0) {
-                value = value * Math.pow(10.0, expSign * exp);
-            } else {
-                throw new NumberFormatException(new String(b, start, end - start, StandardCharsets.UTF_8));
-            }
-        }
-
-        // skip trailing whitespace
-        while (i < end && (b[i] == SPACE || b[i] == CARRIAGE_RETURN || b[i] == '\r' || b[i] == NEW_LINE))
-            i++;
-        if (i != end) {
-            throw new NumberFormatException(new String(b, start, end - start, StandardCharsets.UTF_8));
-        }
-
-        return sign * value;
-    }
+   
 
     /**
      * Parse a block of bytes that contains whole lines (each line ends with
@@ -254,7 +128,7 @@ public class CalculateAverage {
 
                     String city = new String(block, cStart, cEnd - cStart, StandardCharsets.UTF_8);
                     try {
-                        double temperature = parseDoubleAscii(block, delim + 1, logicalEnd);
+                        double temperature = Utils.parseDoubleAscii(block, delim + 1, logicalEnd);
                         CityTemperatureRecord acc = local.computeIfAbsent(city, (k) -> new CityTemperatureRecord(k));
                         acc.accept(temperature);
                     } catch (NumberFormatException ex) {

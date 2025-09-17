@@ -4,7 +4,9 @@ param(
     [switch]$parallel,
     [string]$measurements = "",  # optional path to measurements file; passed as -Dmeasurements=path
     [string]$javaArgs = "-Xms2G -Xmx4G  -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:+UseG1GC -Xlog:gc*:file=gc.log:time,uptime,level", # JVM args to pass before the main class
-    [int]$blockSize = 0  # optional block size; passed as -DblockSize=size
+    [int]$blockSize = 0,  # optional block size; passed as -DblockSize=size
+    [switch]$jfr,
+    [string]$jfrDir = "."  # directory to write JFR recordings when -jfr is specified
 )
 
 $mode = if ($parallel) { 'parallel' } else { 'sequential' }
@@ -15,6 +17,18 @@ Write-Host "Running class: $class -> $outFile"
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $jvmArgsArray = if ([string]::IsNullOrWhiteSpace($javaArgs)) { @() } else { ($javaArgs -split '\s+') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } }
+
+# If JFR profiling is requested, allocate a time-stamped recording filename and add StartFlightRecording JVM arg
+if ($jfr) {
+    if (-not (Test-Path $jfrDir)) {
+        try { New-Item -ItemType Directory -Path $jfrDir -Force | Out-Null } catch { Write-Host "Failed to create JFR directory $jfrDir" -ForegroundColor Yellow }
+    }
+    $timestamp = (Get-Date).ToString('yyyyMMdd_HHmmss')
+    $jfrFile = Join-Path (Resolve-Path $jfrDir) "jfr_${version}_${mode}_${timestamp}.jfr"
+    Write-Host "JFR profiling enabled — recording will be written to: $jfrFile"
+    # Use the standard StartFlightRecording option; dumponexit ensures the file is written when the JVM exits
+    $jvmArgsArray += "-XX:StartFlightRecording=filename=$jfrFile,dumponexit=true,settings=profile"
+}
 
 # System properties to pass before JVM args (e.g. -Dmeasurements)
 $sysProps = @()
