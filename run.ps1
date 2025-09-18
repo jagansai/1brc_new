@@ -13,6 +13,11 @@ $mode = if ($parallel) { 'parallel' } else { 'sequential' }
 $class = if ($version -eq 'baseline') { 'dev.morling.onebrc.CalculateAverage_baseline' } else { 'dev.morling.onebrc.CalculateAverage' }
 $outFile = if ($version -eq 'baseline') { "baseline_output_${mode}.txt" } else { "sai_output_${mode}.txt" }
 
+if (Test-Path $outFile) {
+    Remove-Item $outFile
+    Write-Host "Deleted old file: $outFile"
+}
+
 Write-Host "Running class: $class -> $outFile"
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()

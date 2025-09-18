@@ -9,11 +9,15 @@ import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.TreeMap;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
+
+import dev.morling.ByteSlice;
+
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
@@ -29,54 +33,6 @@ public class CalculateAverage {
     // Use block-based processing for both sequential and parallel modes
     private static final String DEFAULT_BLOCK_SIZE = "1000000"; // 1 MB blocks
 
-    /**
-     * Lightweight byte-slice key to avoid per-line String allocations while
-     * parsing.
-     */
-    private static final class ByteSlice {
-        // small owned byte array containing the bytes for the key (no ref to
-        // the larger block buffer)
-        final byte[] data;
-        final int len;
-        final int hash;
-
-        ByteSlice(byte[] src, int off, int len) {
-            this.data = new byte[len];
-            System.arraycopy(src, off, this.data, 0, len);
-            this.len = len;
-            int h = 1;
-            for (int i = 0; i < len; i++) {
-                h = 31 * h + (this.data[i] & 0xff);
-            }
-            this.hash = h;
-        }
-
-        @Override
-        public int hashCode() {
-            return hash;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o)
-                return true;
-            if (!(o instanceof ByteSlice))
-                return false;
-            ByteSlice b = (ByteSlice) o;
-            if (this.len != b.len)
-                return false;
-            for (int i = 0; i < len; i++) {
-                if (this.data[i] != b.data[i])
-                    return false;
-            }
-            return true;
-        }
-
-        @Override
-        public String toString() {
-            return new String(data, 0, len, StandardCharsets.UTF_8);
-        }
-    }
 
     public static void main(String[] args) throws IOException {
         final boolean asParallel = args.length > 0 && "parallel".equals(args[0]);
@@ -104,7 +60,7 @@ public class CalculateAverage {
 
         // convert ByteSlice-keyed map to a TreeMap keyed by String to iterate
         // in sorted order without an extra sort step
-        java.util.TreeMap<String, CityTemperatureRecord> finalMap = new java.util.TreeMap<>();
+        TreeMap<String, CityTemperatureRecord> finalMap = new TreeMap<>();
         for (var e : records.entrySet()) {
             String name = e.getKey().toString();
             CityTemperatureRecord rec = e.getValue();
@@ -209,11 +165,7 @@ public class CalculateAverage {
     /**
      * Example: block-based file processing using processBlock(byte[], long).
      * Reads ~blockSize bytes, aligns to next newline, and submits to a thread pool
-     * (parallel) or processes inline (sequential).
-     * Does NOT remove or affect processLine(String) or line-based code paths.
-     *
-     * To use: call from main() instead of processInParallel or Files.lines, e.g.:
-     * processFileByBlocks(measurements, records, 1_000_000, asParallel ? 16 : 1);
+     * (parallel) or processes inline (sequential).     
      */
     private static void processFileByBlocks(Path file, Map<ByteSlice, CityTemperatureRecord> records, int blockSize,
             int maxThreads) throws IOException {
@@ -260,7 +212,7 @@ public class CalculateAverage {
     }
 
     private static int readUptoBlockSize(FileChannel ch, long position, byte[] buf) throws IOException {
-        java.nio.ByteBuffer bb = java.nio.ByteBuffer.wrap(buf);
+        ByteBuffer bb = ByteBuffer.wrap(buf);
         int read = 0;
         while (bb.hasRemaining()) {
             int r = ch.read(bb, position + read);
