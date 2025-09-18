@@ -14,7 +14,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
@@ -29,6 +28,55 @@ public class CalculateAverage {
 
     // Use block-based processing for both sequential and parallel modes
     private static final String DEFAULT_BLOCK_SIZE = "1000000"; // 1 MB blocks
+
+    /**
+     * Lightweight byte-slice key to avoid per-line String allocations while
+     * parsing.
+     */
+    private static final class ByteSlice {
+        // small owned byte array containing the bytes for the key (no ref to
+        // the larger block buffer)
+        final byte[] data;
+        final int len;
+        final int hash;
+
+        ByteSlice(byte[] src, int off, int len) {
+            this.data = new byte[len];
+            System.arraycopy(src, off, this.data, 0, len);
+            this.len = len;
+            int h = 1;
+            for (int i = 0; i < len; i++) {
+                h = 31 * h + (this.data[i] & 0xff);
+            }
+            this.hash = h;
+        }
+
+        @Override
+        public int hashCode() {
+            return hash;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o)
+                return true;
+            if (!(o instanceof ByteSlice))
+                return false;
+            ByteSlice b = (ByteSlice) o;
+            if (this.len != b.len)
+                return false;
+            for (int i = 0; i < len; i++) {
+                if (this.data[i] != b.data[i])
+                    return false;
+            }
+            return true;
+        }
+
+        @Override
+        public String toString() {
+            return new String(data, 0, len, StandardCharsets.UTF_8);
+        }
+    }
 
     public static void main(String[] args) throws IOException {
         final boolean asParallel = args.length > 0 && "parallel".equals(args[0]);
@@ -46,7 +94,7 @@ public class CalculateAverage {
 
         Path measurements = Path.of(measurementsPath);
 
-        Map<String, CityTemperatureRecord> records = new HashMap<>();
+        Map<ByteSlice, CityTemperatureRecord> records = new HashMap<>();
 
         int maxThreads = asParallel ? 16 : 1;
         processFileByBlocks(measurements, records, blockSize, maxThreads);
@@ -54,21 +102,29 @@ public class CalculateAverage {
         StringBuilder sb = new StringBuilder();
         sb.append("{");
 
-        try (var recordStream = records.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())) {
-            recordStream.forEach(e -> {
-                CityTemperatureRecord acc = e.getValue();
-                double min = acc.min;
-                double max = acc.max;
-                double sum = acc.sum;
-                long count = acc.count;
-                sb.append(acc.name + "=" +
-                        String.format("%.1f", min) +
-                        "/" +
-                        String.format("%.1f", sum / count) +
-                        "/" +
-                        String.format("%.1f", max) + ", ");
-            });
+        // convert ByteSlice-keyed map to a TreeMap keyed by String to iterate
+        // in sorted order without an extra sort step
+        java.util.TreeMap<String, CityTemperatureRecord> finalMap = new java.util.TreeMap<>();
+        for (var e : records.entrySet()) {
+            String name = e.getKey().toString();
+            CityTemperatureRecord rec = e.getValue();
+            if (rec.name == null)
+                rec.name = name;
+            finalMap.put(name, rec);
+        }
+
+        for (var e : finalMap.entrySet()) {
+            CityTemperatureRecord acc = e.getValue();
+            double min = acc.min;
+            double max = acc.max;
+            double sum = acc.sum;
+            long count = acc.count;
+            sb.append(acc.name + "=" +
+                    String.format("%.1f", min) +
+                    "/" +
+                    String.format("%.1f", sum / count) +
+                    "/" +
+                    String.format("%.1f", max) + ", ");
         }
 
         // Remove trailing comma and space
@@ -90,8 +146,8 @@ public class CalculateAverage {
      * equivalent to processBatch(List<String>), but works from a byte[] to avoid
      * allocations.
      */
-    private static Map<String, CityTemperatureRecord> processBlock(byte[] block, long batchId) {
-        Map<String, CityTemperatureRecord> local = new HashMap<>();
+    private static Map<ByteSlice, CityTemperatureRecord> processBlock(byte[] block, long batchId) {
+        Map<ByteSlice, CityTemperatureRecord> local = new HashMap<>();
         int len = block.length;
         int i = 0;
         while (i < len) {
@@ -127,10 +183,11 @@ public class CalculateAverage {
                     while (cEnd > cStart && (block[cEnd - 1] == SPACE || block[cEnd - 1] == CARRIAGE_RETURN))
                         cEnd--;
 
-                    String city = new String(block, cStart, cEnd - cStart, StandardCharsets.UTF_8);
+                    ByteSlice key = new ByteSlice(block, cStart, cEnd - cStart);
                     try {
                         double temperature = Utils.parseDoubleAscii(block, delim + 1, logicalEnd);
-                        CityTemperatureRecord acc = local.computeIfAbsent(city, (k) -> new CityTemperatureRecord(k));
+                        CityTemperatureRecord acc = local.computeIfAbsent(key,
+                                (_) -> new CityTemperatureRecord());
                         acc.accept(temperature);
                     } catch (NumberFormatException ex) {
                         // ignore malformed
@@ -143,8 +200,6 @@ public class CalculateAverage {
                 i++;
         }
 
-        // optional metrics recording moved to caller (processBatchWithMetrics used
-        // previously)
         return local;
     }
 
@@ -160,12 +215,12 @@ public class CalculateAverage {
      * To use: call from main() instead of processInParallel or Files.lines, e.g.:
      * processFileByBlocks(measurements, records, 1_000_000, asParallel ? 16 : 1);
      */
-    private static void processFileByBlocks(Path file, Map<String, CityTemperatureRecord> records, int blockSize,
+    private static void processFileByBlocks(Path file, Map<ByteSlice, CityTemperatureRecord> records, int blockSize,
             int maxThreads) throws IOException {
         var executor = (maxThreads > 1)
                 ? Executors.newFixedThreadPool(maxThreads)
                 : null;
-        List<Future<Map<String, CityTemperatureRecord>>> futures = new ArrayList<>();
+        List<Future<Map<ByteSlice, CityTemperatureRecord>>> futures = new ArrayList<>();
         Semaphore permits = (maxThreads > 1) ? new Semaphore(maxThreads)
                 : null;
         AtomicLong batchId = new AtomicLong(0);
@@ -253,7 +308,7 @@ public class CalculateAverage {
     }
 
     private static void parallelProcessing(ExecutorService executor,
-            List<Future<Map<String, CityTemperatureRecord>>> futures,
+            List<Future<Map<ByteSlice, CityTemperatureRecord>>> futures,
             Semaphore permits,
             final byte[] block, final long id) throws IOException {
         try {
@@ -276,17 +331,17 @@ public class CalculateAverage {
         }));
     }
 
-    private static void sequentialProcessing(Map<String, CityTemperatureRecord> records, final byte[] block,
+    private static void sequentialProcessing(Map<ByteSlice, CityTemperatureRecord> records, final byte[] block,
             final long id) {
-        Map<String, CityTemperatureRecord> local = processBlock(block, id);
+        Map<ByteSlice, CityTemperatureRecord> local = processBlock(block, id);
         // merge immediately
         for (var e : local.entrySet()) {
-            mergeRecords(records, e);
+            mergeRecords(records, e.getKey(), e.getValue());
         }
     }
 
-    private static void mergeResultsForParallelProcessing(Map<String, CityTemperatureRecord> records,
-            List<Future<Map<String, CityTemperatureRecord>>> futures) {
+    private static void mergeResultsForParallelProcessing(Map<ByteSlice, CityTemperatureRecord> records,
+            List<Future<Map<ByteSlice, CityTemperatureRecord>>> futures) {
         for (var f : futures) {
             try {
                 if (f == null)
@@ -298,7 +353,7 @@ public class CalculateAverage {
                 for (var e : local.entrySet()) {
                     if (e == null || e.getKey() == null || e.getValue() == null)
                         continue;
-                    mergeRecords(records, e);
+                    mergeRecords(records, e.getKey(), e.getValue());
                 }
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
@@ -309,23 +364,23 @@ public class CalculateAverage {
         }
     }
 
-    private static void mergeRecords(Map<String, CityTemperatureRecord> records,
-            Entry<String, CityTemperatureRecord> e) {
-        records.merge(e.getKey(), e.getValue(), (existing, incoming) -> {
+    private static void mergeRecords(Map<ByteSlice, CityTemperatureRecord> records, ByteSlice key,
+            CityTemperatureRecord incoming) {
+        records.merge(key, incoming, (existing, inc) -> {
             if (existing == null)
-                return incoming;
+                return inc;
             if (existing.count == 0) {
-                existing.min = incoming.min;
-                existing.max = incoming.max;
-                existing.sum = incoming.sum;
-                existing.count = incoming.count;
-            } else if (incoming.count > 0) {
-                if (incoming.min < existing.min)
-                    existing.min = incoming.min;
-                if (incoming.max > existing.max)
-                    existing.max = incoming.max;
-                existing.sum += incoming.sum;
-                existing.count += incoming.count;
+                existing.min = inc.min;
+                existing.max = inc.max;
+                existing.sum = inc.sum;
+                existing.count = inc.count;
+            } else if (inc.count > 0) {
+                if (inc.min < existing.min)
+                    existing.min = inc.min;
+                if (inc.max > existing.max)
+                    existing.max = inc.max;
+                existing.sum += inc.sum;
+                existing.count += inc.count;
             }
             return existing;
         });
